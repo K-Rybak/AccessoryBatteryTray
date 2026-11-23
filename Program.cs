@@ -1,24 +1,16 @@
-using Windows.Devices.Bluetooth;
-using AccessoryBatteryTray;
+using AccessoryBatteryTray.Features.Bluetooth.Diagnose;
+using AccessoryBatteryTray.Features.Bluetooth.Watch;
 
-if (args is ["--watch"])
+const string diagnoseCommand = "--diagnose";
+const string watchCommand = "--watch";
+
+if (args is [watchCommand])
     return await BluetoothConnectionMonitor.RunAsync();
 
-if (args is not ["--diagnose"])
+if (args is not [diagnoseCommand])
 {
-    Console.WriteLine("Usage: AccessoryBatteryTray --diagnose | --watch");
+    Console.WriteLine($"Usage: AccessoryBatteryTray {diagnoseCommand} | {watchCommand}");
     return 0;
 }
 
-var classic = await BluetoothDiagnostics.RunAsync(
-    "Classic",
-    BluetoothDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected),
-    BluetoothDevice.GetDeviceSelectorFromPairingState(true));
-
-var lowEnergy = await BluetoothDiagnostics.RunAsync(
-    "LE",
-    BluetoothLEDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected),
-    BluetoothLEDevice.GetDeviceSelectorFromPairingState(true),
-    BluetoothDiagnostics.ReadBatteryAsync);
-
-return classic && lowEnergy ? 0 : 1;
+return await BluetoothDiagnostics.RunAsync();

@@ -1,22 +1,23 @@
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Enumeration;
+using AccessoryBatteryTray.Enums;
 
-namespace AccessoryBatteryTray;
+namespace AccessoryBatteryTray.Features.Bluetooth.Watch;
 
-internal static class BluetoothConnectionMonitor
+internal static partial class BluetoothConnectionMonitor
 {
     public static async Task<int> RunAsync()
     {
         var stopped = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         var classic = new ConnectionWatcher(
-            "Classic",
+            BluetoothTransportType.Classic,
             BluetoothDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected),
             stopped);
         var lowEnergy = new ConnectionWatcher(
-            "LE",
+            BluetoothTransportType.Le,
             BluetoothLEDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected),
             stopped,
-            BluetoothDiagnostics.ReadBatteryAsync);
+            GattBatterySource.WatchBatteryAsync);
 
         ConsoleCancelEventHandler cancel = (_, args) =>
         {
@@ -50,19 +51,19 @@ internal static class BluetoothConnectionMonitor
         private readonly Lock _gate = new();
         private readonly Dictionary<string, Connection> _connections = new(StringComparer.OrdinalIgnoreCase);
         private readonly DeviceWatcher _watcher;
-        private readonly string _transport;
+        private readonly BluetoothTransportType _transport;
         private readonly TaskCompletionSource<int> _stopped;
-        private readonly Func<string, Task<string>>? _readBattery;
+        private readonly Func<string, Action<string>, Task, Task>? _watchBattery;
 
         public ConnectionWatcher(
-            string transport,
+            BluetoothTransportType transport,
             string selector,
             TaskCompletionSource<int> stopped,
-            Func<string, Task<string>>? readBattery = null)
+            Func<string, Action<string>, Task, Task>? watchBattery = null)
         {
             this._transport = transport;
             this._stopped = stopped;
-            this._readBattery = readBattery;
+            this._watchBattery = watchBattery;
             _watcher = DeviceInformation.CreateWatcher(selector);
             _watcher.Added += OnAdded;
             _watcher.Updated += OnUpdated;
@@ -84,7 +85,11 @@ internal static class BluetoothConnectionMonitor
                 _watcher.Stop();
 
             lock (_gate)
+            {
+                foreach (var connection in _connections.Values)
+                    connection.Disconnect();
                 _connections.Clear();
+            }
         }
 
         private void OnAdded(DeviceWatcher sender, DeviceInformation device)
@@ -98,8 +103,8 @@ internal static class BluetoothConnectionMonitor
                 Console.WriteLine($"[{_transport}] Connected: {device.Name}");
             }
 
-            if (_readBattery is not null)
-                _ = ReportBatteryAsync(connection, _readBattery);
+            if (_watchBattery is not null)
+                _ = _watchBattery(device.Id, result => ReportBattery(connection, result), connection.Disconnected);
         }
 
         private void OnUpdated(DeviceWatcher sender, DeviceInformationUpdate update)
@@ -115,8 +120,9 @@ internal static class BluetoothConnectionMonitor
         {
             lock (_gate)
             {
-                if (!_stopped.Task.IsCompleted && _connections.Remove(update.Id, out var connection))
-                    Console.WriteLine($"[{_transport}] Disconnected: {connection.Device.Name}");
+                if (_stopped.Task.IsCompleted || !_connections.Remove(update.Id, out var connection)) return;
+                connection.Disconnect();
+                Console.WriteLine($"[{_transport}] Disconnected: {connection.Device.Name}");
             }
         }
 
@@ -138,9 +144,8 @@ internal static class BluetoothConnectionMonitor
             }
         }
 
-        private async Task ReportBatteryAsync(Connection connection, Func<string, Task<string>> read)
+        private void ReportBattery(Connection connection, string result)
         {
-            var result = await read(connection.Device.Id);
             lock (_gate)
             {
                 if (!_stopped.Task.IsCompleted &&
@@ -154,7 +159,12 @@ internal static class BluetoothConnectionMonitor
 
         private sealed class Connection(DeviceInformation device)
         {
+            private readonly TaskCompletionSource _disconnected = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
             public DeviceInformation Device { get; } = device;
+            public Task Disconnected => _disconnected.Task;
+
+            public void Disconnect() => _disconnected.TrySetResult();
         }
     }
 }
