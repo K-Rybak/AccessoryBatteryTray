@@ -98,7 +98,14 @@ internal static class GattBatterySource
                 report(new BatteryReport.Unavailable(error));
         }
 
-        await Task.WhenAll(levels.Select(level => WatchLevelAsync(device, level, report, disconnected)));
+        if (levels.Count > 0 && !disconnected.IsCompleted)
+        {
+            var kind = BluetoothAccessoryKind.Get(device);
+            void ReportWithKind(BatteryReport update) =>
+                report(update is BatteryReport.Reading reading ? reading with { Kind = kind } : update);
+
+            await Task.WhenAll(levels.Select(level => WatchLevelAsync(device, level, ReportWithKind, disconnected)));
+        }
         return [];
     }
 

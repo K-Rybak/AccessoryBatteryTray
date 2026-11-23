@@ -1,8 +1,12 @@
+using AccessoryBatteryTray.Features.Bluetooth.Common;
+
 namespace AccessoryBatteryTray.Features.Bluetooth;
 
 internal abstract record BatteryReport
 {
-    public sealed record Reading(byte Percent, bool SupportsNotify, bool SupportsIndicate, bool FromNotification = false)
+    public sealed record Reading(
+        byte Percent, bool SupportsNotify, bool SupportsIndicate, bool FromNotification = false,
+        AccessoryKind Kind = AccessoryKind.Generic)
         : BatteryReport;
 
     public sealed record Unavailable(string Reason) : BatteryReport;

@@ -1,16 +1,38 @@
 using AccessoryBatteryTray.Features.Bluetooth.Diagnose;
 using AccessoryBatteryTray.Features.Bluetooth.Watch;
+using AccessoryBatteryTray.Features.Tray;
+using AccessoryBatteryTray.Features.Tray.Diagnostics;
 
-const string diagnoseCommand = "--diagnose";
-const string watchCommand = "--watch";
-
-if (args is [watchCommand])
-    return await BluetoothWatchConsole.RunAsync();
-
-if (args is not [diagnoseCommand])
+internal static class Program
 {
-    Console.WriteLine($"Usage: AccessoryBatteryTray {diagnoseCommand} | {watchCommand}");
-    return 0;
-}
+    private const string DiagnoseCommand = "--diagnose";
+    private const string DiagnoseIconsCommand = "--diagnose-icons";
+    private const string WatchCommand = "--watch";
+    private const string TrayCommand = "--tray";
+    private const string TrayPreviewCommand = "--tray-preview";
+    private const string TrayIconPreviewCommand = "--tray-icon-preview";
 
-return await BluetoothDiagnostics.RunAsync();
+    [STAThread]
+    private static int Main(string[] args)
+    {
+        switch (args)
+        {
+            case [DiagnoseCommand]:
+                return BluetoothDiagnostics.RunAsync().GetAwaiter().GetResult();
+            case [DiagnoseIconsCommand]:
+                return DeviceIconDiagnostics.RunAsync().GetAwaiter().GetResult();
+            case [WatchCommand]:
+                return BluetoothWatchConsole.RunAsync().GetAwaiter().GetResult();
+            case [TrayCommand]:
+                return TrayApplication.Run(preview: false);
+            case [TrayPreviewCommand]:
+                return TrayApplication.Run(preview: true);
+            case [TrayIconPreviewCommand]:
+                return TrayApplication.RunIconPreview();
+            default:
+                Console.WriteLine(
+                    $"Usage: AccessoryBatteryTray {DiagnoseCommand} | {DiagnoseIconsCommand} | {WatchCommand} | {TrayCommand} | {TrayPreviewCommand} | {TrayIconPreviewCommand}");
+                return 0;
+        }
+    }
+}
