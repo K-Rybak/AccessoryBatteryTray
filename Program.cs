@@ -1,9 +1,12 @@
 using Windows.Devices.Bluetooth;
 using AccessoryBatteryTray;
 
+if (args is ["--watch"])
+    return await BluetoothConnectionMonitor.RunAsync();
+
 if (args is not ["--diagnose"])
 {
-    Console.WriteLine("Usage: AccessoryBatteryTray --diagnose");
+    Console.WriteLine("Usage: AccessoryBatteryTray --diagnose | --watch");
     return 0;
 }
 
