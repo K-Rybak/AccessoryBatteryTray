@@ -6,36 +6,41 @@ namespace AccessoryBatteryTray.Features.Bluetooth;
 
 internal static class GattBatterySource
 {
-    public static Task<string> ReadBatteryAsync(string deviceId) =>
+    public static Task<IReadOnlyList<BatteryReport>> ReadBatteryAsync(string deviceId) =>
         WithBatteryServicesAsync(deviceId, (_, services) => ReadLevelsAsync(services));
 
-    public static async Task WatchBatteryAsync(string deviceId, Action<string> report, Task disconnected)
+    public static async Task WatchBatteryAsync(string deviceId, Action<BatteryReport> report, Task disconnected)
     {
         var result = await WithBatteryServicesAsync(
             deviceId,
             (device, services) => WatchLevelsAsync(device, services, report, disconnected),
             disconnected);
-        if (result.Length > 0 && !disconnected.IsCompleted)
-            report(result);
+        foreach (var update in result)
+        {
+            if (disconnected.IsCompleted)
+                return;
+
+            report(update);
+        }
     }
 
-    private static async Task<string> WithBatteryServicesAsync(
+    private static async Task<IReadOnlyList<BatteryReport>> WithBatteryServicesAsync(
         string deviceId,
-        Func<BluetoothLEDevice, IReadOnlyList<GattDeviceService>, Task<string>> useServices,
+        Func<BluetoothLEDevice, IReadOnlyList<GattDeviceService>, Task<IReadOnlyList<BatteryReport>>> useServices,
         Task? disconnected = null)
     {
         if (disconnected?.IsCompleted == true)
-            return "";
+            return [];
 
         var operation = "Open LE device";
         try
         {
             using var device = await BluetoothLEDevice.FromIdAsync(deviceId);
             if (device is null)
-                return $"{operation}: Windows returned no device";
+                return [new BatteryReport.Unavailable($"{operation}: Windows returned no device")];
 
             if (disconnected?.IsCompleted == true || device.ConnectionStatus != BluetoothConnectionStatus.Connected)
-                return "Skipped: LE device is no longer connected";
+                return [new BatteryReport.Unavailable("Skipped: LE device is no longer connected")];
 
             operation = "Discover Battery Service (0x180F)";
             var services = await device.GetGattServicesForUuidAsync(
@@ -43,10 +48,10 @@ internal static class GattBatterySource
             try
             {
                 if (services.Status != GattCommunicationStatus.Success)
-                    return $"{operation}: {FormatStatus(services.Status, services.ProtocolError)}";
+                    return [new BatteryReport.Unavailable($"{operation}: {FormatStatus(services.Status, services.ProtocolError)}")];
 
                 if (services.Services.Count == 0)
-                    return $"{operation}: service not found";
+                    return [new BatteryReport.Unavailable($"{operation}: service not found")];
 
                 return await useServices(device, services.Services);
             }
@@ -58,50 +63,43 @@ internal static class GattBatterySource
         }
         catch (Exception error)
         {
-            return $"{operation}: {Describe(error)}";
+            return [new BatteryReport.Unavailable($"{operation}: {Describe(error)}")];
         }
     }
 
-    private static async Task<string> ReadLevelsAsync(IReadOnlyList<GattDeviceService> services)
+    private static async Task<IReadOnlyList<BatteryReport>> ReadLevelsAsync(IReadOnlyList<GattDeviceService> services)
     {
-        var results = new List<string>();
+        var results = new List<BatteryReport>();
         foreach (var service in services)
         {
             var (levels, error) = await FindLevelsAsync(service);
             if (error is not null)
-                results.Add(error);
+                results.Add(new BatteryReport.Unavailable(error));
 
             foreach (var level in levels)
                 results.Add(await ReadLevelAsync(level));
         }
 
-        return string.Join(" | ", results);
+        return results;
     }
 
-    private static async Task<string> WatchLevelsAsync(
-        BluetoothLEDevice device, IReadOnlyList<GattDeviceService> services, Action<string> report, Task disconnected)
+    private static async Task<IReadOnlyList<BatteryReport>> WatchLevelsAsync(
+        BluetoothLEDevice device, IReadOnlyList<GattDeviceService> services, Action<BatteryReport> report, Task disconnected)
     {
         var levels = new List<GattCharacteristic>();
-        var errors = new List<string>();
         foreach (var service in services)
         {
             if (disconnected.IsCompleted)
-                return "";
+                return [];
 
             var (serviceLevels, error) = await FindLevelsAsync(service);
             levels.AddRange(serviceLevels);
             if (error is not null)
-                errors.Add(error);
+                report(new BatteryReport.Unavailable(error));
         }
 
-        if (levels.Count == 0)
-            return string.Join(" | ", errors);
-
-        foreach (var error in errors)
-            report(error);
-
         await Task.WhenAll(levels.Select(level => WatchLevelAsync(device, level, report, disconnected)));
-        return "";
+        return [];
     }
 
     private static async Task<(IReadOnlyList<GattCharacteristic> Levels, string? Error)> FindLevelsAsync(
@@ -125,7 +123,7 @@ internal static class GattBatterySource
         }
     }
 
-    private static async Task<string> ReadLevelAsync(GattCharacteristic characteristic)
+    private static async Task<BatteryReport> ReadLevelAsync(GattCharacteristic characteristic)
     {
         try
         {
@@ -133,34 +131,32 @@ internal static class GattBatterySource
         }
         catch (Exception error)
         {
-            return $"Read Battery Level: {Describe(error)}";
+            return new BatteryReport.Unavailable($"Read Battery Level: {Describe(error)}");
         }
     }
 
-    private static async Task<string> ReadLevelCoreAsync(GattCharacteristic characteristic)
+    private static async Task<BatteryReport> ReadLevelCoreAsync(GattCharacteristic characteristic)
     {
         var properties = characteristic.CharacteristicProperties;
         if (!properties.HasFlag(GattCharacteristicProperties.Read))
-            return "Battery Level does not support reads";
+            return new BatteryReport.Unavailable("Battery Level does not support reads");
 
         var result = await characteristic.ReadValueAsync(BluetoothCacheMode.Uncached);
         if (result.Status != GattCommunicationStatus.Success)
-            return $"Read Battery Level: {FormatStatus(result.Status, result.ProtocolError)}";
+            return new BatteryReport.Unavailable($"Read Battery Level: {FormatStatus(result.Status, result.ProtocolError)}");
 
         if (result.Value is null || result.Value.Length != 1)
-            return $"Read Battery Level: expected 1 byte, got {result.Value?.Length ?? 0}";
+            return new BatteryReport.Unavailable($"Read Battery Level: expected 1 byte, got {result.Value?.Length ?? 0}");
 
         var level = ReadByte(result.Value);
         if (level > 100)
-            return $"Read Battery Level: value {level} is outside 0–100";
+            return new BatteryReport.Unavailable($"Read Battery Level: value {level} is outside 0–100");
 
-        var notify = properties.HasFlag(GattCharacteristicProperties.Notify);
-        var indicate = properties.HasFlag(GattCharacteristicProperties.Indicate);
-        return $"Battery: {level}% (GATT, Notify={notify}, Indicate={indicate})";
+        return CreateReading(level, properties);
     }
 
     private static async Task WatchLevelAsync(
-        BluetoothLEDevice device, GattCharacteristic characteristic, Action<string> report, Task disconnected)
+        BluetoothLEDevice device, GattCharacteristic characteristic, Action<BatteryReport> report, Task disconnected)
     {
         if (!IsConnected())
             return;
@@ -178,9 +174,10 @@ internal static class GattBatterySource
     }
 
     private static async Task<bool> TryWatchNotificationsAsync(
-        GattCharacteristic characteristic, Action<string> report, Task disconnected)
+        GattCharacteristic characteristic, Action<BatteryReport> report, Task disconnected)
     {
-        var configuration = GetNotificationConfiguration(characteristic.CharacteristicProperties);
+        var properties = characteristic.CharacteristicProperties;
+        var configuration = GetNotificationConfiguration(properties);
         if (configuration == GattClientCharacteristicConfigurationDescriptorValue.None)
             return false;
 
@@ -191,7 +188,7 @@ internal static class GattBatterySource
 
             var percent = ReadByte(args.CharacteristicValue);
             if (percent <= 100)
-                report($"Battery update: {percent}% (GATT notification)");
+                report(CreateReading(percent, properties, fromNotification: true));
         }
 
         characteristic.ValueChanged += OnValueChanged;
@@ -200,17 +197,18 @@ internal static class GattBatterySource
             var status = await characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(configuration);
             if (status != GattCommunicationStatus.Success)
             {
-                report($"GATT subscription failed: {status}");
+                report(new BatteryReport.SubscriptionFailed(status.ToString()));
                 return false;
             }
 
-            report($"GATT subscription active ({configuration})");
+            report(new BatteryReport.SubscriptionActive(
+                configuration == GattClientCharacteristicConfigurationDescriptorValue.Indicate));
             await disconnected;
             return true;
         }
         catch (Exception error)
         {
-            report($"GATT subscription failed: {Describe(error)}");
+            report(new BatteryReport.SubscriptionFailed(Describe(error)));
             return false;
         }
         finally
@@ -232,10 +230,10 @@ internal static class GattBatterySource
     }
 
     private static async Task PollLevelAsync(
-        GattCharacteristic characteristic, Action<string> report, Task disconnected, Func<bool> isConnected)
+        GattCharacteristic characteristic, Action<BatteryReport> report, Task disconnected, Func<bool> isConnected)
     {
         var interval = TimeSpan.FromMinutes(5);
-        report($"Polling Battery Level every {interval.TotalMinutes:0} minutes");
+        report(new BatteryReport.Polling(interval));
         while (isConnected())
         {
             try
@@ -250,6 +248,13 @@ internal static class GattBatterySource
             }
         }
     }
+
+    private static BatteryReport.Reading CreateReading(
+        byte percent, GattCharacteristicProperties properties, bool fromNotification = false) =>
+        new(percent,
+            properties.HasFlag(GattCharacteristicProperties.Notify),
+            properties.HasFlag(GattCharacteristicProperties.Indicate),
+            fromNotification);
 
     private static byte ReadByte(IBuffer buffer)
     {

@@ -5,7 +5,7 @@ const string diagnoseCommand = "--diagnose";
 const string watchCommand = "--watch";
 
 if (args is [watchCommand])
-    return await BluetoothConnectionMonitor.RunAsync();
+    return await BluetoothWatchConsole.RunAsync();
 
 if (args is not [diagnoseCommand])
 {

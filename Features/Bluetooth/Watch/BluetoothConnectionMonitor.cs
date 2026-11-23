@@ -6,43 +6,36 @@ namespace AccessoryBatteryTray.Features.Bluetooth.Watch;
 
 internal static partial class BluetoothConnectionMonitor
 {
-    public static async Task<int> RunAsync()
+    public static async Task<int> RunAsync(Action<BluetoothMonitorEvent> publish, CancellationToken cancellationToken)
     {
         var stopped = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         var classic = new ConnectionWatcher(
             BluetoothTransportType.Classic,
             BluetoothDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected),
-            stopped);
+            stopped,
+            publish);
         var lowEnergy = new ConnectionWatcher(
             BluetoothTransportType.Le,
             BluetoothLEDevice.GetDeviceSelectorFromConnectionStatus(BluetoothConnectionStatus.Connected),
             stopped,
+            publish,
             GattBatterySource.WatchBatteryAsync);
 
-        ConsoleCancelEventHandler cancel = (_, args) =>
-        {
-            args.Cancel = true;
-            stopped.TrySetResult(0);
-        };
-        Console.CancelKeyPress += cancel;
+        await using var cancellation = cancellationToken.Register(() => stopped.TrySetResult(0));
         try
         {
-            Console.WriteLine("Watching Bluetooth connections. Press Ctrl+C to stop.");
+            if (stopped.Task.IsCompleted)
+                return await stopped.Task;
+
             classic.Start();
             lowEnergy.Start();
             return await stopped.Task;
-        }
-        catch (Exception error)
-        {
-            await Console.Error.WriteLineAsync($"Could not start Bluetooth monitoring (0x{error.HResult:X8}): {error.Message}");
-            return 1;
         }
         finally
         {
             stopped.TrySetResult(0);
             lowEnergy.Stop();
             classic.Stop();
-            Console.CancelKeyPress -= cancel;
         }
     }
 
@@ -53,16 +46,19 @@ internal static partial class BluetoothConnectionMonitor
         private readonly DeviceWatcher _watcher;
         private readonly BluetoothTransportType _transport;
         private readonly TaskCompletionSource<int> _stopped;
-        private readonly Func<string, Action<string>, Task, Task>? _watchBattery;
+        private readonly Action<BluetoothMonitorEvent> _publish;
+        private readonly Func<string, Action<BatteryReport>, Task, Task>? _watchBattery;
 
         public ConnectionWatcher(
             BluetoothTransportType transport,
             string selector,
             TaskCompletionSource<int> stopped,
-            Func<string, Action<string>, Task, Task>? watchBattery = null)
+            Action<BluetoothMonitorEvent> publish,
+            Func<string, Action<BatteryReport>, Task, Task>? watchBattery = null)
         {
             this._transport = transport;
             this._stopped = stopped;
+            _publish = publish;
             this._watchBattery = watchBattery;
             _watcher = DeviceInformation.CreateWatcher(selector);
             _watcher.Added += OnAdded;
@@ -100,7 +96,7 @@ internal static partial class BluetoothConnectionMonitor
                 if (_stopped.Task.IsCompleted || !_connections.TryAdd(device.Id, connection))
                     return;
 
-                Console.WriteLine($"[{_transport}] Connected: {device.Name}");
+                _publish(new BluetoothMonitorEvent.Connected(_transport, device.Id, device.Name));
             }
 
             if (_watchBattery is not null)
@@ -122,7 +118,7 @@ internal static partial class BluetoothConnectionMonitor
             {
                 if (_stopped.Task.IsCompleted || !_connections.Remove(update.Id, out var connection)) return;
                 connection.Disconnect();
-                Console.WriteLine($"[{_transport}] Disconnected: {connection.Device.Name}");
+                _publish(new BluetoothMonitorEvent.Disconnected(_transport, update.Id, connection.Device.Name));
             }
         }
 
@@ -131,7 +127,7 @@ internal static partial class BluetoothConnectionMonitor
             lock (_gate)
             {
                 if (!_stopped.Task.IsCompleted)
-                    Console.WriteLine($"[{_transport}] Initial enumeration complete: {_connections.Count} connected");
+                    _publish(new BluetoothMonitorEvent.InitialEnumerationCompleted(_transport, _connections.Count));
             }
         }
 
@@ -140,11 +136,11 @@ internal static partial class BluetoothConnectionMonitor
             lock (_gate)
             {
                 if (_stopped.TrySetResult(1))
-                    Console.Error.WriteLine($"[{_transport}] Watcher stopped unexpectedly: {sender.Status}");
+                    _publish(new BluetoothMonitorEvent.WatcherStopped(_transport, sender.Status));
             }
         }
 
-        private void ReportBattery(Connection connection, string result)
+        private void ReportBattery(Connection connection, BatteryReport result)
         {
             lock (_gate)
             {
@@ -152,7 +148,8 @@ internal static partial class BluetoothConnectionMonitor
                     _connections.TryGetValue(connection.Device.Id, out var current) &&
                     ReferenceEquals(current, connection))
                 {
-                    Console.WriteLine($"[{_transport}] {connection.Device.Name} | {result}");
+                    _publish(new BluetoothMonitorEvent.BatteryReported(
+                        _transport, connection.Device.Id, connection.Device.Name, result));
                 }
             }
         }

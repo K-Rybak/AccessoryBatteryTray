@@ -28,7 +28,7 @@ internal static class BluetoothDiagnostics
         string transport,
         string connectedSelector,
         string pairedSelector,
-        Func<string, Task<string>>? readBattery = null)
+        Func<string, Task<IReadOnlyList<BatteryReport>>>? readBattery = null)
     {
         Console.WriteLine();
         Console.WriteLine($"[{transport}]");
@@ -52,7 +52,7 @@ internal static class BluetoothDiagnostics
         {
             var result = readBattery is null
                 ? "Battery unavailable through the Classic entry; check LE results"
-                : await readBattery(device.Id);
+                : string.Join(" | ", (await readBattery(device.Id)).Select(BatteryConsoleText.Format));
             Console.WriteLine($"  {device.Name} | Connected at enumeration | {result}");
         }
 
