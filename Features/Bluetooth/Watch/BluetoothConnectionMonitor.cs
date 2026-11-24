@@ -6,7 +6,11 @@ namespace AccessoryBatteryTray.Features.Bluetooth.Watch;
 
 internal static partial class BluetoothConnectionMonitor
 {
-    public static async Task<int> RunAsync(Action<BluetoothMonitorEvent> publish, CancellationToken cancellationToken)
+    public static Task<int> RunAsync(Action<BluetoothMonitorEvent> publish, CancellationToken shutdown) =>
+        BluetoothRadioMonitor.RunAsync(session => RunWatchersAsync(publish, session, shutdown), shutdown);
+
+    private static async Task<int> RunWatchersAsync(
+        Action<BluetoothMonitorEvent> publish, CancellationToken cancellationToken, CancellationToken shutdown)
     {
         var stopped = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         var classic = new ConnectionWatcher(
@@ -34,8 +38,15 @@ internal static partial class BluetoothConnectionMonitor
         finally
         {
             stopped.TrySetResult(0);
-            lowEnergy.Stop();
-            classic.Stop();
+            var reportDisconnected = !shutdown.IsCancellationRequested;
+            try
+            {
+                lowEnergy.Stop(reportDisconnected);
+            }
+            finally
+            {
+                classic.Stop(reportDisconnected);
+            }
         }
     }
 
@@ -70,8 +81,23 @@ internal static partial class BluetoothConnectionMonitor
 
         public void Start() => _watcher.Start();
 
-        public void Stop()
+        public void Stop(bool reportDisconnected)
         {
+            lock (_gate)
+            {
+                foreach (var connection in _connections.Values)
+                {
+                    connection.Disconnect();
+                    if (reportDisconnected)
+                    {
+                        _publish(new BluetoothMonitorEvent.Disconnected(
+                            _transport, connection.Device.Id, connection.Device.Name));
+                    }
+                }
+
+                _connections.Clear();
+            }
+
             _watcher.Added -= OnAdded;
             _watcher.Updated -= OnUpdated;
             _watcher.Removed -= OnRemoved;
@@ -79,13 +105,6 @@ internal static partial class BluetoothConnectionMonitor
             _watcher.Stopped -= OnStopped;
             if (_watcher.Status is DeviceWatcherStatus.Started or DeviceWatcherStatus.EnumerationCompleted)
                 _watcher.Stop();
-
-            lock (_gate)
-            {
-                foreach (var connection in _connections.Values)
-                    connection.Disconnect();
-                _connections.Clear();
-            }
         }
 
         private void OnAdded(DeviceWatcher sender, DeviceInformation device)
