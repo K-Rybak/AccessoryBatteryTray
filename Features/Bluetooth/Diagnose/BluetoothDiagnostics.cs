@@ -1,5 +1,6 @@
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Enumeration;
+using AccessoryBatteryTray.Features.Bluetooth.Common;
 
 namespace AccessoryBatteryTray.Features.Bluetooth.Diagnose;
 

@@ -1,3 +1,5 @@
+using AccessoryBatteryTray.Features.Bluetooth.Common;
+
 namespace AccessoryBatteryTray.Features.Bluetooth.Watch;
 
 internal static class BluetoothWatchConsole

@@ -1,4 +1,4 @@
-namespace AccessoryBatteryTray.Features.Bluetooth;
+namespace AccessoryBatteryTray.Features.Bluetooth.Common;
 
 internal static class BatteryConsoleText
 {
