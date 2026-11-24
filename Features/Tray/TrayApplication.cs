@@ -7,7 +7,40 @@ namespace AccessoryBatteryTray.Features.Tray;
 
 internal static class TrayApplication
 {
-    public static int Run(bool preview)
+    private const string InstanceMutexName = @"Local\AccessoryBatteryTray.LiveTray";
+
+    public static int RunLive()
+    {
+        using var instanceMutex = new Mutex(initiallyOwned: false, name: InstanceMutexName);
+        bool acquired;
+        try
+        {
+            acquired = instanceMutex.WaitOne(0);
+        }
+        catch (AbandonedMutexException)
+        {
+            acquired = true;
+        }
+
+        if (!acquired)
+        {
+            Console.WriteLine("AccessoryBatteryTray is already running in this Windows session.");
+            return 0;
+        }
+
+        try
+        {
+            return Run(preview: false);
+        }
+        finally
+        {
+            instanceMutex.ReleaseMutex();
+        }
+    }
+
+    public static int RunPreview() => Run(preview: true);
+
+    private static int Run(bool preview)
     {
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         using var panel = new AccessoryPanel();

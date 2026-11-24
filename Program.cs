@@ -24,9 +24,9 @@ internal static class Program
             case [WatchCommand]:
                 return BluetoothWatchConsole.RunAsync().GetAwaiter().GetResult();
             case [TrayCommand]:
-                return TrayApplication.Run(preview: false);
+                return TrayApplication.RunLive();
             case [TrayPreviewCommand]:
-                return TrayApplication.Run(preview: true);
+                return TrayApplication.RunPreview();
             case [TrayIconPreviewCommand]:
                 return TrayApplication.RunIconPreview();
             default:
