@@ -9,7 +9,7 @@ internal static class TrayApplication
 {
     private const string InstanceMutexName = @"Local\AccessoryBatteryTray.LiveTray";
 
-    public static int RunLive()
+    public static int RunLive(bool consoleControls = true)
     {
         using var instanceMutex = new Mutex(initiallyOwned: false, name: InstanceMutexName);
         bool acquired;
@@ -30,7 +30,7 @@ internal static class TrayApplication
 
         try
         {
-            return Run(preview: false);
+            return Run(preview: false, consoleControls);
         }
         finally
         {
@@ -38,9 +38,9 @@ internal static class TrayApplication
         }
     }
 
-    public static int RunPreview() => Run(preview: true);
+    public static int RunPreview() => Run(preview: true, consoleControls: true);
 
-    private static int Run(bool preview)
+    private static int Run(bool preview, bool consoleControls)
     {
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         using var panel = new AccessoryPanel();
@@ -89,10 +89,12 @@ internal static class TrayApplication
             else
                 cancellation.Cancel();
         };
-        Console.CancelKeyPress += cancel;
+        if (consoleControls)
+            Console.CancelKeyPress += cancel;
         try
         {
-            Console.WriteLine("Click the battery icon in the notification area. Press Ctrl+C to stop.");
+            if (consoleControls)
+                Console.WriteLine("Click the battery icon in the notification area. Press Ctrl+C to stop.");
             panel.Post(() =>
             {
                 if (preview)
@@ -112,7 +114,8 @@ internal static class TrayApplication
         }
         finally
         {
-            Console.CancelKeyPress -= cancel;
+            if (consoleControls)
+                Console.CancelKeyPress -= cancel;
         }
     }
 
