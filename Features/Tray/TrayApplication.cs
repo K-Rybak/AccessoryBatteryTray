@@ -43,6 +43,7 @@ internal static class TrayApplication
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         using var panel = new AccessoryPanel(watchSystemPower: !preview);
         using var cancellation = new CancellationTokenSource();
+        using var trayMenu = preview ? null : new TrayContextMenu(panel, cancellation.Cancel);
         var exitCode = 0;
 
         async Task MonitorAsync()

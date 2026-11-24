@@ -57,6 +57,12 @@ internal static class ShellTray
         ShellNotifyIcon(Command.Delete, ref data);
     }
 
+    public static void SetFocus(nint window, uint id)
+    {
+        var data = CreateData(window, id);
+        ShellNotifyIcon(Command.SetFocus, ref data);
+    }
+
     public static Rectangle? GetIconBounds(nint window, uint id)
     {
         var identifier = new NotifyIconIdentifier
@@ -85,6 +91,7 @@ internal static class ShellTray
         Add = 0,
         Modify = 1,
         Delete = 2,
+        SetFocus = 3,
         SetVersion = 4
     }
 
@@ -142,4 +149,8 @@ internal static class ShellTray
     [DllImport("user32.dll", ExactSpelling = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool DestroyIcon(nint icon);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetForegroundWindow(nint window);
 }

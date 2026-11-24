@@ -12,6 +12,7 @@ internal sealed class AccessoryPanel : Form
 {
     private const uint IconId = 1;
     private const int IconCallbackMessage = 0x8001;
+    private const int ContextMenuNotification = 0x007b;
     private const int LeftButtonUp = 0x0202;
     private const int NotifySelect = 0x0400;
     private const int NotifyKeySelect = 0x0401;
@@ -34,6 +35,8 @@ internal sealed class AccessoryPanel : Form
 
     public event Action? Suspending;
     public event Action? Resumed;
+    public event Action<Point>? ContextMenuRequested;
+    public event Action? TrayIconHidden;
 
     public AccessoryPanel(bool watchSystemPower)
     {
@@ -135,6 +138,13 @@ internal sealed class AccessoryPanel : Form
         if (_iconVisible)
             ShellTray.Delete(Handle, IconId);
         _iconVisible = false;
+        TrayIconHidden?.Invoke();
+    }
+
+    public void FocusTrayIcon()
+    {
+        if (_iconVisible)
+            ShellTray.SetFocus(Handle, IconId);
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -162,6 +172,8 @@ internal sealed class AccessoryPanel : Form
             var notification = (int)(message.LParam.ToInt64() & 0xffff);
             if (notification is LeftButtonUp or NotifySelect or NotifyKeySelect)
                 OpenPanel();
+            else if (notification == ContextMenuNotification)
+                OpenContextMenu();
             return;
         }
 
@@ -184,6 +196,7 @@ internal sealed class AccessoryPanel : Form
         if (_taskbarCreated != 0 && message.Msg == _taskbarCreated)
         {
             Hide();
+            TrayIconHidden?.Invoke();
             _iconVisible = _tiles.Count > 0 && RegisterIcon(update: _iconVisible);
         }
     }
@@ -240,6 +253,17 @@ internal sealed class AccessoryPanel : Form
         }
 
         Activate();
+    }
+
+    private void OpenContextMenu()
+    {
+        if (!_iconVisible || ContextMenuRequested is not { } show)
+            return;
+
+        Hide();
+        var location = ShellTray.GetIconBounds(Handle, IconId)?.Location ?? Cursor.Position;
+        ShellTray.SetForegroundWindow(Handle);
+        show(location);
     }
 
     private void Reposition()

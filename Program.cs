@@ -35,9 +35,9 @@ internal static class Program
             case [TrayIconPreviewCommand]:
                 return TrayApplication.RunIconPreview();
             case [EnableStartupCommand, var executablePath]:
-                return WindowsStartup.Enable(executablePath);
+                return StartupConsole.Enable(executablePath);
             case [DisableStartupCommand]:
-                return WindowsStartup.Disable();
+                return StartupConsole.Disable();
             default:
                 Console.WriteLine(
                     $"Usage: AccessoryBatteryTray [{DiagnoseCommand} | {DiagnoseIconsCommand} | {WatchCommand} | {TrayCommand} | {TrayPreviewCommand} | {TrayIconPreviewCommand} | {EnableStartupCommand} <exe-path> | {DisableStartupCommand}]");
