@@ -31,6 +31,7 @@ internal sealed class AccessoryPanel : Form
     private readonly FlowLayoutPanel _devices;
     private readonly bool _watchSystemPower;
     private nint _powerRegistration;
+    private bool _hasDevices;
     private bool _iconVisible;
 
     public event Action? Suspending;
@@ -77,8 +78,6 @@ internal sealed class AccessoryPanel : Form
         var description = $"{name} · {percent}%";
         tile.UpdateDevice(kind, percent, description);
         _toolTip.SetToolTip(tile, description);
-        if (!_iconVisible)
-            _iconVisible = RegisterIcon();
         if (added && Visible)
             Reposition();
         if (added)
@@ -110,19 +109,28 @@ internal sealed class AccessoryPanel : Form
         DisposeTile(tile);
 
         if (_tiles.Count == 0)
-            HideTrayIcon();
+            Hide();
         else if (Visible)
             Reposition();
     }
 
     public void ClearDevices()
     {
-        HideTrayIcon();
+        SetIconPresence(hasDevices: false);
         _devices.SuspendLayout();
         foreach (var tile in _tiles.Values)
             DisposeTile(tile);
         _tiles.Clear();
         _devices.ResumeLayout(performLayout: false);
+    }
+
+    public void SetIconPresence(bool hasDevices)
+    {
+        _hasDevices = hasDevices;
+        if (!hasDevices)
+            HideTrayIcon();
+        else if (!_iconVisible)
+            _iconVisible = RegisterIcon();
     }
 
     private void DisposeTile(DeviceTile tile)
@@ -197,7 +205,7 @@ internal sealed class AccessoryPanel : Form
         {
             Hide();
             TrayIconHidden?.Invoke();
-            _iconVisible = _tiles.Count > 0 && RegisterIcon(update: _iconVisible);
+            _iconVisible = _hasDevices && RegisterIcon(update: _iconVisible);
         }
     }
 

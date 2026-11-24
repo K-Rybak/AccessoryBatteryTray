@@ -43,12 +43,13 @@ internal static class TrayApplication
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         using var panel = new AccessoryPanel(watchSystemPower: !preview);
         using var cancellation = new CancellationTokenSource();
-        using var trayMenu = preview ? null : new TrayContextMenu(panel, cancellation.Cancel);
+        var devices = preview ? null : new TrayDeviceList(panel);
+        using var trayMenu = devices is null ? null : new TrayContextMenu(panel, devices, cancellation.Cancel);
         var exitCode = 0;
 
-        async Task MonitorAsync()
+        async Task MonitorAsync(TrayDeviceList liveDevices)
         {
-            var session = new TrayConnectionSession(panel);
+            var session = new TrayConnectionSession(panel, liveDevices);
             panel.Suspending += session.Suspend;
             panel.Resumed += session.Resume;
             try
@@ -84,16 +85,17 @@ internal static class TrayApplication
                 Console.WriteLine("Click the battery icon in the notification area. Press Ctrl+C to stop.");
             panel.Post(() =>
             {
-                if (preview)
+                if (devices is null)
                 {
                     panel.SetDevice("preview-keyboard", AccessoryKind.Keyboard, "Node 75 HP-1", 100, useSystemGlyph: false);
                     panel.SetDevice("preview-mouse", AccessoryKind.Mouse, "Wireless mouse", 93, useSystemGlyph: false);
                     panel.SetDevice("preview-headphones", AccessoryKind.Headphones, "Bluetooth headphones", 30, useSystemGlyph: false);
                     panel.SetDevice("preview-gamepad", AccessoryKind.Gamepad, "Wireless controller", 76, useSystemGlyph: false);
+                    panel.SetIconPresence(hasDevices: true);
                 }
                 else
                 {
-                    _ = MonitorAsync();
+                    _ = MonitorAsync(devices);
                 }
             });
             Application.Run();

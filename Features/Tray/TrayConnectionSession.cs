@@ -4,7 +4,7 @@ using AccessoryBatteryTray.Features.Bluetooth.Watch;
 
 namespace AccessoryBatteryTray.Features.Tray;
 
-internal sealed class TrayConnectionSession(AccessoryPanel panel)
+internal sealed class TrayConnectionSession(AccessoryPanel panel, TrayDeviceList devices)
 {
     private CancellationTokenSource? _activeSession;
     private TaskCompletionSource? _resumeSignal;
@@ -67,7 +67,7 @@ internal sealed class TrayConnectionSession(AccessoryPanel panel)
     private void InvalidateConnections()
     {
         _activeSession?.Cancel();
-        panel.ClearDevices();
+        devices.Clear();
     }
 
     private void PostUpdate(BluetoothMonitorEvent update, CancellationToken sessionToken)
@@ -83,10 +83,10 @@ internal sealed class TrayConnectionSession(AccessoryPanel panel)
             switch (update)
             {
                 case BluetoothMonitorEvent.BatteryReported { Report: BatteryReport.Reading reading } battery:
-                    panel.SetDevice(battery.DeviceId, reading.Kind, battery.DeviceName, reading.Percent, useSystemGlyph: true);
+                    devices.UpdateDevice(battery.DeviceId, reading.Kind, battery.DeviceName, reading.Percent);
                     break;
                 case BluetoothMonitorEvent.Disconnected disconnected:
-                    panel.RemoveDevice(disconnected.DeviceId);
+                    devices.RemoveDevice(disconnected.DeviceId);
                     break;
                 case BluetoothMonitorEvent.WatcherStopped stopped:
                     Console.Error.WriteLine($"[{stopped.Transport}] Watcher stopped unexpectedly: {stopped.Status}");
