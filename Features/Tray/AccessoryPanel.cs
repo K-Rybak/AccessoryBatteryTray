@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using AccessoryBatteryTray.Features.Bluetooth;
 using AccessoryBatteryTray.Features.Bluetooth.Common;
@@ -14,6 +15,10 @@ internal sealed class AccessoryPanel : Form
     private const int LeftButtonUp = 0x0202;
     private const int NotifySelect = 0x0400;
     private const int NotifyKeySelect = 0x0401;
+    private const int PowerBroadcastMessage = 0x0218;
+    private const int PowerSuspend = 0x0004;
+    private const int PowerResumeAutomatic = 0x0012;
+    private const uint NotifyWindowHandle = 0;
     private const int AnchorGap = 6;
     private const int MaxColumns = 3;
     private const int PanelPadding = 8;
@@ -23,10 +28,16 @@ internal sealed class AccessoryPanel : Form
     private readonly ToolTip _toolTip = new();
     private readonly Dictionary<string, DeviceTile> _tiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly FlowLayoutPanel _devices;
+    private readonly bool _watchSystemPower;
+    private nint _powerRegistration;
     private bool _iconVisible;
 
-    public AccessoryPanel()
+    public event Action? Suspending;
+    public event Action? Resumed;
+
+    public AccessoryPanel(bool watchSystemPower)
     {
+        _watchSystemPower = watchSystemPower;
         Text = "Accessory batteries";
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -93,18 +104,55 @@ internal sealed class AccessoryPanel : Form
         if (!_tiles.Remove(id, out var tile))
             return;
 
+        DisposeTile(tile);
+
+        if (_tiles.Count == 0)
+            HideTrayIcon();
+        else if (Visible)
+            Reposition();
+    }
+
+    public void ClearDevices()
+    {
+        HideTrayIcon();
+        _devices.SuspendLayout();
+        foreach (var tile in _tiles.Values)
+            DisposeTile(tile);
+        _tiles.Clear();
+        _devices.ResumeLayout(performLayout: false);
+    }
+
+    private void DisposeTile(DeviceTile tile)
+    {
         _toolTip.SetToolTip(tile, null);
         _devices.Controls.Remove(tile);
         tile.Dispose();
+    }
 
-        if (_tiles.Count == 0)
-        {
-            Hide();
+    private void HideTrayIcon()
+    {
+        Hide();
+        if (_iconVisible)
             ShellTray.Delete(Handle, IconId);
-            _iconVisible = false;
+        _iconVisible = false;
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        if (_watchSystemPower)
+            _powerRegistration = RegisterSuspendResumeNotification(Handle, NotifyWindowHandle);
+    }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        if (_powerRegistration != 0)
+        {
+            UnregisterSuspendResumeNotification(_powerRegistration);
+            _powerRegistration = 0;
         }
-        else if (Visible)
-            Reposition();
+
+        base.OnHandleDestroyed(e);
     }
 
     protected override void WndProc(ref Message message)
@@ -115,6 +163,21 @@ internal sealed class AccessoryPanel : Form
             if (notification is LeftButtonUp or NotifySelect or NotifyKeySelect)
                 OpenPanel();
             return;
+        }
+
+        if (_watchSystemPower && message.Msg == PowerBroadcastMessage)
+        {
+            switch (message.WParam.ToInt64())
+            {
+                case PowerSuspend:
+                    Suspending?.Invoke();
+                    message.Result = 1;
+                    return;
+                case PowerResumeAutomatic:
+                    Resumed?.Invoke();
+                    message.Result = 1;
+                    return;
+            }
         }
 
         base.WndProc(ref message);
@@ -245,4 +308,11 @@ internal sealed class AccessoryPanel : Form
             ShellTray.DestroyIcon(icon);
         }
     }
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern nint RegisterSuspendResumeNotification(nint recipient, uint flags);
+
+    [DllImport("user32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnregisterSuspendResumeNotification(nint registration);
 }

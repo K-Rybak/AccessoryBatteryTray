@@ -1,7 +1,5 @@
 using System.Windows.Forms;
-using AccessoryBatteryTray.Features.Bluetooth;
 using AccessoryBatteryTray.Features.Bluetooth.Common;
-using AccessoryBatteryTray.Features.Bluetooth.Watch;
 
 namespace AccessoryBatteryTray.Features.Tray;
 
@@ -43,32 +41,18 @@ internal static class TrayApplication
     private static int Run(bool preview, bool consoleControls)
     {
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        using var panel = new AccessoryPanel();
+        using var panel = new AccessoryPanel(watchSystemPower: !preview);
         using var cancellation = new CancellationTokenSource();
         var exitCode = 0;
 
-        void Publish(BluetoothMonitorEvent update)
-        {
-            switch (update)
-            {
-                case BluetoothMonitorEvent.BatteryReported { Report: BatteryReport.Reading reading } battery:
-                    panel.Post(() => panel.SetDevice(
-                        battery.DeviceId, reading.Kind, battery.DeviceName, reading.Percent, useSystemGlyph: true));
-                    break;
-                case BluetoothMonitorEvent.Disconnected disconnected:
-                    panel.Post(() => panel.RemoveDevice(disconnected.DeviceId));
-                    break;
-                case BluetoothMonitorEvent.WatcherStopped stopped:
-                    Console.Error.WriteLine($"[{stopped.Transport}] Watcher stopped unexpectedly: {stopped.Status}");
-                    break;
-            }
-        }
-
         async Task MonitorAsync()
         {
+            var session = new TrayConnectionSession(panel);
+            panel.Suspending += session.Suspend;
+            panel.Resumed += session.Resume;
             try
             {
-                exitCode = await BluetoothConnectionMonitor.RunAsync(Publish, cancellation.Token);
+                exitCode = await session.RunAsync(cancellation.Token);
             }
             catch (Exception error)
             {
@@ -77,6 +61,8 @@ internal static class TrayApplication
             }
             finally
             {
+                panel.Suspending -= session.Suspend;
+                panel.Resumed -= session.Resume;
                 panel.Post(Application.ExitThread);
             }
         }
